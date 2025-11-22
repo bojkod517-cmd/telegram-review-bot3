@@ -6,15 +6,18 @@ from datetime import datetime
 
 # ====== Настройки ======
 BOT_TOKEN = "8009524027:AAHTRgwiKnUi9AAh1_LTkekGZ-mRvNzH7dY"
-OWNER_ID = 1470389051
+OWNER_ID = 1470389051  # твой ID
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
-# ====== База данных отзывов ======
+# ====== База данных ======
 reviews_db = {
     "admins": {
-        "sherlock": {"display": "#Шерлок", "reviews": []}
+        "sherlock": {
+            "display": "#Шерлок",
+            "reviews": []
+        }
     },
     "pending": {}
 }
@@ -23,74 +26,23 @@ reviews_db = {
 def is_owner(user_id):
     return user_id == OWNER_ID
 
-# ====== Стартовое меню ======
-def main_keyboard(user_id):
+# ====== Главное меню ======
+def main_menu(chat_id):
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("📊 Посмотреть репутацию")
-    kb.add("📝 Оставить отзыв")
-    if user_id == OWNER_ID:
-        kb.add("🛠 Админ-меню")
-    return kb
+    kb.add(
+        types.KeyboardButton("Оставить отзыв"),
+        types.KeyboardButton("📊 Посмотреть репутацию"),
+        types.KeyboardButton("🛠 Админ-меню")
+    )
+    bot.send_message(chat_id, "Выберите действие:", reply_markup=kb)
 
+# ====== /start ======
 @bot.message_handler(commands=['start'])
 def start_message(message):
-    bot.send_message(
-        message.chat.id,
-        "Привет! Я бот отзывов, оставь свой отзыв через кнопки внизу 👇",
-        reply_markup=main_keyboard(message.from_user.id)
-    )
+    bot.send_message(message.chat.id, "Привет! Я бот отзывов, оставь свой отзыв через кнопки ниже.")
+    main_menu(message.chat.id)
 
-# ====== Начало отзыва ======
-@bot.message_handler(func=lambda m: m.text == "📝 Оставить отзыв")
-def start_review(message):
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("#Шерлок")
-    kb.add("Отмена")
-    bot.send_message(message.chat.id, "Выберите администратора, используя # перед именем (например #Шерлок):", reply_markup=kb)
-
-# ====== Выбор администратора ======
-@bot.message_handler(func=lambda m: m.text.startswith("#"))
-def select_admin(message):
-    admin_key = message.text[1:].lower()  # убираем # и приводим к lower
-    if admin_key != "sherlock":
-        bot.send_message(message.chat.id, "❌ Такой админ не найден. Напишите # перед именем, например #Шерлок")
-        return
-    user_id = str(message.from_user.id)
-    reviews_db["pending"][user_id] = {"key": admin_key, "stars": 0, "text": ""}
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    for i in range(1, 6):
-        kb.add(str(i))
-    bot.send_message(message.chat.id, f"Вы выбрали {reviews_db['admins'][admin_key]['display']}. Теперь выберите количество ⭐️ (1-5):", reply_markup=kb)
-
-# ====== Выбор звезд ======
-@bot.message_handler(func=lambda m: str(m.from_user.id) in reviews_db["pending"] and m.text in ["1","2","3","4","5"])
-def select_stars(message):
-    user_id = str(message.from_user.id)
-    reviews_db["pending"][user_id]["stars"] = int(message.text)
-    bot.send_message(message.chat.id, "Если хотите оставить текстовый отзыв об админе, напишите его. Если нет, напишите '-'")
-    
-# ====== Ввод текста ======
-@bot.message_handler(func=lambda m: str(m.from_user.id) in reviews_db["pending"])
-def enter_text_review(message):
-    user_id = str(message.from_user.id)
-    if reviews_db["pending"][user_id]["stars"] == 0:
-        # пользователь еще не выбрал звезды
-        return
-    text = message.text.strip()
-    if not text:
-        text = "-"
-    reviews_db["pending"][user_id]["text"] = text
-    data = reviews_db["pending"].pop(user_id)
-    entry = {
-        "user": message.from_user.username or f"id{message.from_user.id}",
-        "stars": data["stars"],
-        "text": "" if data["text"] == "-" else data["text"],
-        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    }
-    reviews_db["admins"][data["key"]]["reviews"].append(entry)
-    bot.send_message(message.chat.id, f"✅ Отзыв оставлен! {'⭐️'*entry['stars']}", reply_markup=main_keyboard(message.from_user.id))
-
-# ====== Просмотр рейтинга ======
+# ====== Посмотреть репутацию ======
 @bot.message_handler(func=lambda m: m.text == "📊 Посмотреть репутацию")
 def show_ratings(message):
     if not reviews_db["admins"]:
@@ -105,11 +57,12 @@ def show_ratings(message):
         txt += f"{info['display']} — {'⭐️'*int(avg)} ({avg})\n"
         for r in reviews:
             user = r['user']
-            stars = '⭐️'*r['stars']
+            stars = '⭐️' * r['stars']
             text = f" — {r['text']}" if r['text'] else ""
             txt += f"   • {user}: {stars}{text}\n"
         txt += "\n"
     bot.send_message(message.chat.id, txt or "Пока нет отзывов.")
+    main_menu(message.chat.id)
 
 # ====== Админ-меню ======
 @bot.message_handler(func=lambda m: m.text == "🛠 Админ-меню")
@@ -153,8 +106,63 @@ def admin_actions(call):
         else:
             bot.send_message(call.message.chat.id, "Отзыв не найден.")
     bot.answer_callback_query(call.id)
+    # ====== Оставить отзыв ======
+@bot.message_handler(func=lambda m: m.text == "Оставить отзыв")
+def start_review(message):
+    bot.send_message(message.chat.id, "Напишите администратора с #, например: #Шерлок")
+    reviews_db["pending"][str(message.from_user.id)] = {}
 
-# ====== Webhook для Render ======
+@bot.message_handler(func=lambda m: str(m.from_user.id) in reviews_db["pending"])
+def save_review(message):
+    user_id = str(message.from_user.id)
+    if "admin" not in reviews_db["pending"][user_id]:
+        text = message.text.strip()
+        if not text.startswith("#"):
+            bot.send_message(message.chat.id, "Пожалуйста, напишите # перед именем, например #Шерлок")
+            return
+        admin_key = text[1:].lower()
+        if admin_key not in reviews_db["admins"]:
+            bot.send_message(message.chat.id, "Админ не найден")
+            return
+        reviews_db["pending"][user_id]["admin"] = admin_key
+        # Выбор звезд
+        kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        for i in range(1,6):
+            kb.add(types.KeyboardButton(str(i)))
+        bot.send_message(message.chat.id, "Выберите количество звезд (1-5):", reply_markup=kb)
+        return
+
+    if "stars" not in reviews_db["pending"][user_id]:
+        try:
+            stars = int(message.text.strip())
+            if stars < 1 or stars > 5:
+                raise ValueError
+        except:
+            bot.send_message(message.chat.id, "Пожалуйста, выберите число от 1 до 5")
+            return
+        reviews_db["pending"][user_id]["stars"] = stars
+        # Запрос текстового отзыва
+        bot.send_message(message.chat.id, "Если хотите оставить текстовый отзыв, напишите его. Если нет, напишите '-'")
+        return
+
+    # Сохраняем текстовый отзыв
+    text = message.text.strip()
+    if text == "-":
+        text = ""
+    pending = reviews_db["pending"].pop(user_id)
+    admin_key = pending["admin"]
+    stars = pending["stars"]
+    entry = {
+        "user": message.from_user.username or f"id{message.from_user.id}",
+        "stars": stars,
+        "text": text,
+        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    reviews_db["admins"][admin_key]["reviews"].append(entry)
+    bot.send_message(message.chat.id, f"✅ Отзыв сохранён! {'⭐️'*stars}")
+    main_menu(message.chat.id)
+
+# ====== Flask Webhook ======
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def webhook():
     json_str = request.get_data().decode("utf-8")
@@ -166,9 +174,9 @@ def webhook():
 def home():
     return "Бот работает ✅"
 
-# ====== Запуск ======
+# ====== Запуск бота ======
 def run_bot():
-    bot.remove_webhook()  # видаляємо старий webhook
+    bot.remove_webhook()
     bot.infinity_polling(timeout=60, long_polling_timeout=60)
 
 if __name__ == "__main__":
